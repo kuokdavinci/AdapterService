@@ -62,11 +62,11 @@ def _rec_date() -> datetime:
     return datetime(2024, 1, 15, tzinfo=timezone.utc)
 
 
-class TestHappyPath:
-    """Test 1: Happy path — all valid rows processed correctly."""
+class TestStandardFile:
+    """Test with standard fixture containing mix of valid/invalid rows."""
 
     @pytest.mark.asyncio
-    async def test_happy_path_all_valid_rows(
+    async def test_standard_file_mixed_rows(
         self,
         mock_db: MagicMock,
         mock_reconciliation_file_repo: MagicMock,
@@ -75,7 +75,7 @@ class TestHappyPath:
         sample_mapping_config: MappingConfig,
         test_excel_file: str,
     ):
-        """10 valid rows are all persisted with correct stats."""
+        """Standard file with mixed rows: 8 valid, 2 invalid processed correctly."""
         # Override config to use columns A, B, D, Q with all valid data
         field_mappings = [
             FieldMapping(path="id", column="A", type=FieldMappingType.STRING, required=True),
