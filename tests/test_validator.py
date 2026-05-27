@@ -1,7 +1,9 @@
 """Tests for Validator core validation — required field validation."""
 
-from datetime import datetime
+import uuid
+from datetime import datetime, timezone
 from decimal import Decimal
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -289,3 +291,251 @@ class TestFullValidation:
         result = validator.validate(txn)
         assert result.is_valid is True
         assert result.errors == []
+
+
+class TestDuplicateDetection:
+    """Test duplicate detection with mocked repositories."""
+
+    def _make_valid_txn(self, **overrides: dict) -> CanonicalTransaction:
+        """Helper to create a valid CanonicalTransaction with optional overrides."""
+        defaults = {
+            "id": "TXN001",
+            "amount": Decimal("100000"),
+            "currency": "VND",
+            "status": TransactionStatus.SUCCESS,
+        }
+        defaults.update(overrides)
+        return CanonicalTransaction(**defaults)
+
+    @pytest.mark.asyncio
+    async def test_transaction_duplicate_detected(self):
+        """Transaction duplicate detected when repo returns match."""
+        from src.models.data_container import DataContainer, PartnerData
+
+        rec_date = datetime(2024, 1, 15, tzinfo=timezone.utc)
+        partner = PartnerData(
+            id="61838642196",
+            trace="TRACE001",
+            status="SUCCESS",
+            amount=Decimal("100000"),
+            currency="VND",
+        )
+        existing = DataContainer(
+            identify="MOMO",
+            workflow_type="UPC",
+            reconciliation_date=rec_date,
+            source_file_id=uuid.uuid4(),
+            partner_data=partner,
+        )
+
+        mock_data_repo = AsyncMock()
+        mock_data_repo.find_by_duplicate_key.return_value = existing
+        mock_file_repo = AsyncMock()
+
+        validator = Validator(
+            data_container_repo=mock_data_repo,
+            reconciliation_file_repo=mock_file_repo,
+        )
+        txn = self._make_valid_txn()
+
+        result = await validator.validate_with_duplicates(
+            txn,
+            identify="MOMO",
+            reconciliation_date=rec_date,
+            row_number=5,
+            trace="TRACE001",
+        )
+
+        assert result.is_valid is False
+        assert len(result.errors) == 1
+        assert result.errors[0].field == "duplicate"
+        assert "already exists" in result.errors[0].reason
+        assert result.errors[0].row == 5
+        assert result.errors[0].trace == "TRACE001"
+
+    @pytest.mark.asyncio
+    async def test_no_transaction_duplicate_when_repo_returns_none(self):
+        """No transaction duplicate when repo returns None."""
+        mock_data_repo = AsyncMock()
+        mock_data_repo.find_by_duplicate_key.return_value = None
+        mock_file_repo = AsyncMock()
+
+        validator = Validator(
+            data_container_repo=mock_data_repo,
+            reconciliation_file_repo=mock_file_repo,
+        )
+        txn = self._make_valid_txn()
+        rec_date = datetime(2024, 1, 15, tzinfo=timezone.utc)
+
+        result = await validator.validate_with_duplicates(
+            txn,
+            identify="MOMO",
+            reconciliation_date=rec_date,
+            trace="TRACE001",
+        )
+
+        assert result.is_valid is True
+        assert result.errors == []
+
+    @pytest.mark.asyncio
+    async def test_file_duplicate_detected(self):
+        """File duplicate detected when repo returns match."""
+        from src.models.reconciliation_file import ReconciliationFile
+
+        rec_date = datetime(2024, 1, 15, tzinfo=timezone.utc)
+        existing_file = ReconciliationFile(
+            partner="MOMO",
+            file_name="test.xlsx",
+            file_hash="abc123def456789012345678901234567890",
+            file_type="SETTLEMENT",
+            reconciliation_date=rec_date,
+        )
+
+        mock_data_repo = AsyncMock()
+        mock_data_repo.find_by_duplicate_key.return_value = None
+        mock_file_repo = AsyncMock()
+        mock_file_repo.find_by_file_hash.return_value = existing_file
+
+        validator = Validator(
+            data_container_repo=mock_data_repo,
+            reconciliation_file_repo=mock_file_repo,
+        )
+        txn = self._make_valid_txn()
+
+        result = await validator.validate_with_duplicates(
+            txn,
+            identify="MOMO",
+            reconciliation_date=rec_date,
+            file_hash="abc123def456789012345678901234567890",
+        )
+
+        assert result.is_valid is False
+        assert len(result.errors) == 1
+        assert result.errors[0].field == "file_duplicate"
+        assert "already processed" in result.errors[0].reason
+        assert "abc123def4567890" in result.errors[0].reason
+
+    @pytest.mark.asyncio
+    async def test_no_file_duplicate_when_repo_returns_none(self):
+        """No file duplicate when repo returns None."""
+        mock_data_repo = AsyncMock()
+        mock_data_repo.find_by_duplicate_key.return_value = None
+        mock_file_repo = AsyncMock()
+        mock_file_repo.find_by_file_hash.return_value = None
+
+        validator = Validator(
+            data_container_repo=mock_data_repo,
+            reconciliation_file_repo=mock_file_repo,
+        )
+        txn = self._make_valid_txn()
+        rec_date = datetime(2024, 1, 15, tzinfo=timezone.utc)
+
+        result = await validator.validate_with_duplicates(
+            txn,
+            identify="MOMO",
+            reconciliation_date=rec_date,
+            file_hash="abc123",
+        )
+
+        assert result.is_valid is True
+        assert result.errors == []
+
+    @pytest.mark.asyncio
+    async def test_both_transaction_and_file_duplicates(self):
+        """Both transaction + file duplicates detected simultaneously."""
+        from src.models.data_container import DataContainer, PartnerData
+        from src.models.reconciliation_file import ReconciliationFile
+
+        rec_date = datetime(2024, 1, 15, tzinfo=timezone.utc)
+        partner = PartnerData(
+            id="61838642196",
+            trace="TRACE001",
+            status="SUCCESS",
+            amount=Decimal("100000"),
+            currency="VND",
+        )
+        existing_txn = DataContainer(
+            identify="MOMO",
+            workflow_type="UPC",
+            reconciliation_date=rec_date,
+            source_file_id=uuid.uuid4(),
+            partner_data=partner,
+        )
+        existing_file = ReconciliationFile(
+            partner="MOMO",
+            file_name="test.xlsx",
+            file_hash="abc123def456789012345678901234567890",
+            file_type="SETTLEMENT",
+            reconciliation_date=rec_date,
+        )
+
+        mock_data_repo = AsyncMock()
+        mock_data_repo.find_by_duplicate_key.return_value = existing_txn
+        mock_file_repo = AsyncMock()
+        mock_file_repo.find_by_file_hash.return_value = existing_file
+
+        validator = Validator(
+            data_container_repo=mock_data_repo,
+            reconciliation_file_repo=mock_file_repo,
+        )
+        txn = self._make_valid_txn()
+
+        result = await validator.validate_with_duplicates(
+            txn,
+            identify="MOMO",
+            reconciliation_date=rec_date,
+            file_hash="abc123def456789012345678901234567890",
+            trace="TRACE001",
+        )
+
+        assert result.is_valid is False
+        assert len(result.errors) == 2
+        fields = {e.field for e in result.errors}
+        assert "duplicate" in fields
+        assert "file_duplicate" in fields
+
+    @pytest.mark.asyncio
+    async def test_duplicate_checks_skipped_when_repos_not_provided(self):
+        """Duplicate checks skipped when repos not provided."""
+        validator = Validator()
+        txn = self._make_valid_txn()
+        rec_date = datetime(2024, 1, 15, tzinfo=timezone.utc)
+
+        result = await validator.validate_with_duplicates(
+            txn,
+            identify="MOMO",
+            reconciliation_date=rec_date,
+            file_hash="abc123",
+            trace="TRACE001",
+        )
+
+        assert result.is_valid is True
+        assert result.errors == []
+
+    @pytest.mark.asyncio
+    async def test_duplicate_errors_collected_with_other_validation_errors(self):
+        """Duplicate errors collected alongside other validation errors."""
+        mock_data_repo = AsyncMock()
+        mock_data_repo.find_by_duplicate_key.return_value = True  # truthy = duplicate found
+        mock_file_repo = AsyncMock()
+
+        validator = Validator(
+            data_container_repo=mock_data_repo,
+            reconciliation_file_repo=mock_file_repo,
+        )
+        txn = self._make_valid_txn(id="", amount=Decimal("-500"))
+        rec_date = datetime(2024, 1, 15, tzinfo=timezone.utc)
+
+        result = await validator.validate_with_duplicates(
+            txn,
+            identify="MOMO",
+            reconciliation_date=rec_date,
+            trace="TRACE001",
+        )
+
+        assert result.is_valid is False
+        assert len(result.errors) == 3
+        fields = {e.field for e in result.errors}
+        assert "id" in fields
+        assert "amount" in fields
+        assert "duplicate" in fields

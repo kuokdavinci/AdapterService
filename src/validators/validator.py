@@ -5,6 +5,7 @@ Validates CanonicalTransaction objects against business rules:
 - Decimal validation (non-negative)
 - Date validation (type integrity)
 - Status validation (enum membership)
+- Duplicate detection (transaction-level and file-level)
 
 Collects ALL errors — never fail-fast.
 """
@@ -12,10 +13,14 @@ Collects ALL errors — never fail-fast.
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from src.core.enums import TransactionStatus
 from src.core.types import CanonicalTransaction, ValidationError
+
+if TYPE_CHECKING:
+    from src.models.data_container import DataContainerRepository
+    from src.models.reconciliation_file import ReconciliationFileRepository
 
 
 @dataclass
@@ -36,7 +41,25 @@ class Validator:
 
     Never raises exceptions — all errors are collected as ValidationError
     objects. Multiple errors are collected (not fail-fast).
+
+    Optional repository injection enables duplicate detection:
+    - data_container_repo: For transaction-level duplicate checks
+    - reconciliation_file_repo: For file-level duplicate checks
     """
+
+    def __init__(
+        self,
+        data_container_repo: Optional["DataContainerRepository"] = None,
+        reconciliation_file_repo: Optional["ReconciliationFileRepository"] = None,
+    ):
+        """Initialize Validator with optional repositories for duplicate detection.
+
+        Args:
+            data_container_repo: Repository for transaction duplicate checks.
+            reconciliation_file_repo: Repository for file duplicate checks.
+        """
+        self._data_container_repo = data_container_repo
+        self._reconciliation_file_repo = reconciliation_file_repo
 
     def validate(
         self,
@@ -63,6 +86,104 @@ class Validator:
 
         result.is_valid = len(result.errors) == 0
         return result
+
+    async def validate_with_duplicates(
+        self,
+        txn: CanonicalTransaction,
+        identify: str,
+        reconciliation_date: datetime,
+        file_hash: Optional[str] = None,
+        row_number: Optional[int] = None,
+        trace: Optional[str] = None,
+    ) -> ValidationResult:
+        """Validate a CanonicalTransaction including duplicate detection.
+
+        Runs core validation first, then checks for duplicates if repositories
+        are available. All errors (core + duplicate) are collected together.
+
+        Args:
+            txn: The canonical transaction to validate.
+            identify: Partner identifier for duplicate lookup.
+            reconciliation_date: Reconciliation date for duplicate lookup.
+            file_hash: Optional SHA256 hash of the source file.
+            row_number: Optional row number for error context.
+            trace: Optional trace identifier for error context.
+
+        Returns:
+            ValidationResult with all collected errors (core + duplicate).
+        """
+        # Run core validation first
+        result = self.validate(txn, row_number, trace)
+
+        # Check duplicates if repositories are available
+        txn_dup = await self._check_transaction_duplicate(
+            identify, reconciliation_date, trace, row_number
+        )
+        if txn_dup is not None:
+            result.errors.append(txn_dup)
+
+        file_dup = await self._check_file_duplicate(file_hash)
+        if file_dup is not None:
+            result.errors.append(file_dup)
+
+        result.is_valid = len(result.errors) == 0
+        return result
+
+    async def _check_transaction_duplicate(
+        self,
+        identify: str,
+        reconciliation_date: datetime,
+        trace: Optional[str],
+        row_number: Optional[int],
+    ) -> Optional[ValidationError]:
+        """Check if a transaction with the same key already exists.
+
+        Args:
+            identify: Partner identifier.
+            reconciliation_date: Reconciliation date.
+            trace: Transaction trace identifier.
+            row_number: Row number for error context.
+
+        Returns:
+            ValidationError if duplicate found, None otherwise.
+        """
+        if self._data_container_repo is None or trace is None:
+            return None
+
+        existing = await self._data_container_repo.find_by_duplicate_key(
+            identify, reconciliation_date, trace
+        )
+        if existing is not None:
+            return ValidationError(
+                field="duplicate",
+                reason="transaction already exists in data_container",
+                row=row_number,
+                trace=trace,
+            )
+        return None
+
+    async def _check_file_duplicate(
+        self,
+        file_hash: Optional[str],
+    ) -> Optional[ValidationError]:
+        """Check if a file with the same hash was already processed.
+
+        Args:
+            file_hash: SHA256 hash of the source file.
+
+        Returns:
+            ValidationError if duplicate found, None otherwise.
+        """
+        if self._reconciliation_file_repo is None or file_hash is None:
+            return None
+
+        existing = await self._reconciliation_file_repo.find_by_file_hash(file_hash)
+        if existing is not None:
+            return ValidationError(
+                field="file_duplicate",
+                reason=f"file already processed (hash: {file_hash[:16]}...)",
+            )
+        return None
 
     def _validate_required_fields(
         self,
