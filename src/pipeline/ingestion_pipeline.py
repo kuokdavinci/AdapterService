@@ -11,7 +11,7 @@ from typing import Any, Optional
 from src.config.loader import ConfigLoader
 from src.core.enums import ProcessingStatus
 from src.core.types import ProcessingStats
-from src.models.data_container import DataContainer, DataContainerRepository
+from src.models.data_container import DataContainer, DataContainerRepository, PartnerData
 from src.models.mapping_config import MappingConfig
 from src.models.reconciliation_file import ReconciliationFile, ReconciliationFileRepository
 
@@ -59,7 +59,7 @@ class IngestionPipeline:
         self._data_repo = DataContainerRepository(db)
 
     def _compute_file_hash(self, file_path: str) -> str:
-        """Compute SHA256 hash of the file path string.
+        """Compute SHA256 hash of the file content.
 
         Args:
             file_path: Path to the file.
@@ -69,7 +69,11 @@ class IngestionPipeline:
         """
         import hashlib
 
-        return hashlib.sha256(file_path.encode("utf-8")).hexdigest()
+        sha256 = hashlib.sha256()
+        with open(file_path, "rb") as f:
+            for chunk in iter(lambda: f.read(8192), b""):
+                sha256.update(chunk)
+        return sha256.hexdigest()
 
     def _tuple_to_dict(self, row_tuple: tuple) -> dict[str, Any]:
         """Convert a row tuple to a dict keyed by column letter.
@@ -273,8 +277,6 @@ class IngestionPipeline:
                         continue
 
                     # 8g: Valid → add to batch buffer
-                    from src.models.data_container import PartnerData
-
                     partner_data = PartnerData(
                         **{"_id": txn.id},
                         trace=txn.trace,
@@ -295,14 +297,14 @@ class IngestionPipeline:
 
                     # 8i: Flush when batch reaches batch_size
                     if len(batch_buffer) >= self._batch_size:
-                        await self._flush_batch(batch_buffer)
-                        success_rows += len(batch_buffer)
+                        inserted = await self._flush_batch(batch_buffer)
+                        success_rows += inserted
                         batch_buffer = []
 
                 # Step 9: Flush remaining batch
                 if batch_buffer:
-                    await self._flush_batch(batch_buffer)
-                    success_rows += len(batch_buffer)
+                    inserted = await self._flush_batch(batch_buffer)
+                    success_rows += inserted
 
             # Step 10: Update stats and status
             if file_record is not None:
