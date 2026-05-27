@@ -313,6 +313,9 @@ class IngestionPipeline:
                     file_record.id, ProcessingStatus.COMPLETED
                 )
                 file_record.processing_status = ProcessingStatus.COMPLETED
+                file_record.total_rows = total_rows
+                file_record.success_rows = success_rows
+                file_record.failed_rows = failed_rows
 
             # Step 11: Return result
             stats = ProcessingStats(
@@ -337,6 +340,9 @@ class IngestionPipeline:
                         file_record.id, ProcessingStatus.FAILED
                     )
                     file_record.processing_status = ProcessingStatus.FAILED
+                    file_record.total_rows = total_rows
+                    file_record.success_rows = success_rows
+                    file_record.failed_rows = failed_rows
                 except Exception:
                     pass  # Best effort — original error is more important
 
