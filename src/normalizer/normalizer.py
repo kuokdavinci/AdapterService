@@ -12,7 +12,7 @@ from typing import Any, Optional
 
 from src.core.constants import DEFAULT_CURRENCY
 from src.core.enums import TransactionStatus
-from src.core.types import FieldMapping, FieldMappingType, ValidationError
+from src.core.types import FieldMapping, FieldMappingType, ValidationError, CanonicalTransaction
 
 
 @dataclass
@@ -316,3 +316,65 @@ class TransactionNormalizer:
             )
 
         return fm.constant, None
+
+    @staticmethod
+    def build_canonical(
+        data: dict[str, Any],
+        errors: list[ValidationError],
+        row_number: Optional[int] = None,
+    ) -> tuple[CanonicalTransaction | None, list[ValidationError]]:
+        """Build a CanonicalTransaction from normalized data.
+
+        Validates that all required fields (id, amount, currency, status)
+        are present and valid.  Missing fields produce ValidationError
+        objects appended to the *errors* list.  Extra fields not in the
+        CanonicalTransaction schema are collected into the ``extra`` dict.
+
+        Args:
+            data: Normalized canonical field values keyed by path.
+            errors: Existing error list (not cleared; new errors appended).
+            row_number: Optional row number for error context.
+
+        Returns:
+            Tuple of (CanonicalTransaction or None, updated error list).
+        """
+        required_fields = ("id", "amount", "currency", "status")
+        new_errors: list[ValidationError] = []
+
+        for field_name in required_fields:
+            if field_name not in data:
+                new_errors.append(ValidationError(
+                    field=field_name,
+                    reason=f"required field '{field_name}' not found in normalized data",
+                    row=row_number,
+                ))
+
+        if new_errors:
+            return None, errors + new_errors
+
+        # Validate and convert status string to TransactionStatus enum
+        try:
+            status_enum = TransactionStatus(data["status"])
+        except (ValueError, TypeError):
+            new_errors.append(ValidationError(
+                field="status",
+                reason=f"invalid status value '{data['status']}' — must be one of SUCCESS, FAILED, PENDING, REVERSED",
+                row=row_number,
+            ))
+            return None, errors + new_errors
+
+        # Collect extra fields (keys not in CanonicalTransaction schema)
+        canonical_keys = {"id", "trace", "amount", "currency", "status", "transDate"}
+        extra = {k: v for k, v in data.items() if k not in canonical_keys}
+
+        txn = CanonicalTransaction(
+            id=str(data["id"]),
+            trace=str(data["trace"]) if "trace" in data else None,
+            amount=data["amount"],
+            currency=str(data["currency"]),
+            status=status_enum,
+            transDate=data.get("transDate"),
+            extra=extra,
+        )
+
+        return txn, errors
