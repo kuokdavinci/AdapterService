@@ -227,6 +227,15 @@ class Validator:
         - Amount must be non-negative (zero is valid for refunds/zero-value txns).
         - Type correctness already enforced by CanonicalTransaction pydantic model.
         """
+        if txn.amount is None:
+            result.errors.append(ValidationError(
+                field="amount",
+                reason="required field 'amount' is missing",
+                row=row_number,
+                trace=trace,
+            ))
+            return
+
         if txn.amount < 0:
             result.errors.append(ValidationError(
                 field="amount",
