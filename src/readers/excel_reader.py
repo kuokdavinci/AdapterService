@@ -18,6 +18,17 @@ class ExcelStreamReader:
     of file size. Supports context manager protocol for automatic resource cleanup.
     """
 
+    # Default patterns for summary/footer row detection (case-insensitive)
+    DEFAULT_SKIP_PATTERNS: list[str] = [
+        "total",
+        "grand total",
+        "summary",
+        "footer",
+        "合计",
+        "总计",
+        "小计",
+    ]
+
     def __init__(
         self,
         file_path: str | Path,
@@ -25,6 +36,8 @@ class ExcelStreamReader:
         sheet_name: str | None = None,
         sheet_index: int | None = None,
         start_row: int = 1,
+        skip_empty_rows: bool = True,
+        skip_patterns: list[str] | None = None,
     ) -> None:
         """Initialize the reader with a file path.
 
@@ -33,6 +46,9 @@ class ExcelStreamReader:
             sheet_name: Select sheet by name (mutually exclusive with sheet_index).
             sheet_index: Select sheet by 0-based index (mutually exclusive with sheet_name).
             start_row: 1-based row number to start reading from (default 1 = first row).
+            skip_empty_rows: Skip rows where all cells are None or empty string (default True).
+            skip_patterns: List of string patterns; skip rows where ANY cell contains
+                a pattern match (case-insensitive). Defaults to common summary/footer keywords.
 
         Raises:
             FileNotFoundError: If the file does not exist.
@@ -52,6 +68,11 @@ class ExcelStreamReader:
         self._sheet_name: str | None = sheet_name
         self._sheet_index: int | None = sheet_index
         self._start_row: int = start_row
+        self._skip_empty_rows: bool = skip_empty_rows
+        self._skip_patterns: list[str] | None = (
+            skip_patterns if skip_patterns is not None
+            else self.DEFAULT_SKIP_PATTERNS
+        )
 
     def __enter__(self) -> Self:
         """Load the workbook in read-only mode and select the worksheet.
@@ -120,8 +141,50 @@ class ExcelStreamReader:
         else:
             self._worksheet = self._workbook.active  # type: ignore[assignment]
 
+    @staticmethod
+    def _is_empty_row(row: tuple) -> bool:
+        """Check if a row is empty (all cells are None or empty string).
+
+        Args:
+            row: Tuple of cell values from openpyxl.
+
+        Returns:
+            True if ALL cells are None or empty string, False otherwise.
+        """
+        return all(cell is None or cell == "" for cell in row)
+
+    def _should_skip_row(self, row: tuple) -> bool:
+        """Determine whether a row should be skipped.
+
+        Checks empty rows (if skip_empty_rows is True) and pattern matches
+        (if skip_patterns is provided).
+
+        Args:
+            row: Tuple of cell values from openpyxl.
+
+        Returns:
+            True if the row should be skipped, False otherwise.
+        """
+        if self._skip_empty_rows and self._is_empty_row(row):
+            return True
+
+        if self._skip_patterns:
+            for cell in row:
+                if cell is None:
+                    continue
+                cell_str = str(cell).lower()
+                for pattern in self._skip_patterns:
+                    if pattern.lower() in cell_str:
+                        return True
+
+        return False
+
     def iter_rows(self) -> Iterator[tuple]:
         """Iterate over rows in the selected worksheet starting from start_row.
+
+        Rows are filtered: empty rows (all None/empty) are skipped when
+        skip_empty_rows is True (default). Rows matching skip_patterns
+        (case-insensitive substring match) are also skipped.
 
         Yields:
             Tuples of cell values (str, int, float, datetime, None, etc.).
@@ -134,4 +197,6 @@ class ExcelStreamReader:
         for row in self._worksheet.iter_rows(  # type: ignore[union-attr]
             min_row=self._start_row, values_only=True
         ):
+            if self._should_skip_row(row):
+                continue
             yield row
