@@ -72,8 +72,8 @@ Plans:
 **Plans:** 2 plans
 
 Plans:
-- [ ] 04-01-PLAN.md — Core TransactionNormalizer with STRING/DECIMAL/DATE/CONSTANT type conversion and error collection
-- [ ] 04-02-PLAN.md — MAPPING type status normalization, CanonicalTransaction builder, comprehensive tests
+- [x] 04-01-PLAN.md — Core TransactionNormalizer with STRING/DECIMAL/DATE/CONSTANT type conversion and error collection
+- [x] 04-02-PLAN.md — MAPPING type status normalization, CanonicalTransaction builder, comprehensive tests
 
 ---
 
