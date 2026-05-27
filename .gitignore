@@ -23,3 +23,6 @@ build/
 # Coverage
 .coverage
 htmlcov/
+
+# Planning artifacts (internal GSD docs)
+.planning/
