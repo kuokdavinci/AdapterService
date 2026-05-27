@@ -88,7 +88,7 @@ class TransactionNormalizer:
                     # Value is None/empty — produce error
                     error = ValidationError(
                         field=fm.path,
-                        reason="source field not found in row",
+                        reason="source field value is None",
                         row=row_number,
                     )
                     result.errors.append(error)
@@ -214,7 +214,7 @@ class TransactionNormalizer:
 
         try:
             return Decimal(str(value)), None
-        except (InvalidOperation, ValueError) as exc:
+        except InvalidOperation as exc:
             return None, ValidationError(
                 field=fm.path,
                 reason=f"invalid decimal value: {value!r}",
