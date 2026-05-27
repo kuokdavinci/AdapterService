@@ -59,6 +59,7 @@ class Validator:
         self._validate_required_fields(txn, result, row_number, trace)
         self._validate_decimal(txn, result, row_number, trace)
         self._validate_date(txn, result, row_number, trace)
+        self._validate_status(txn, result, row_number, trace)
 
         result.is_valid = len(result.errors) == 0
         return result
@@ -133,3 +134,24 @@ class Validator:
                     row=row_number,
                     trace=trace,
                 ))
+
+    def _validate_status(
+        self,
+        txn: CanonicalTransaction,
+        result: ValidationResult,
+        row_number: Optional[int],
+        trace: Optional[str],
+    ) -> None:
+        """Validate status is a valid TransactionStatus enum member.
+
+        Since CanonicalTransaction already coerces to TransactionStatus enum
+        via pydantic, this is a defensive check. In practice this should never
+        fail after CanonicalTransaction construction, but validates the contract.
+        """
+        if txn.status not in TransactionStatus:
+            result.errors.append(ValidationError(
+                field="status",
+                reason=f"invalid status value '{txn.status}' — must be one of {', '.join(s.value for s in TransactionStatus)}",
+                row=row_number,
+                trace=trace,
+            ))

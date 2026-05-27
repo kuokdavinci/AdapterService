@@ -193,3 +193,99 @@ class TestDateValidation:
         txn = _make_valid_txn(transDate=dt)
         result = validator.validate(txn)
         assert result.is_valid is True
+
+
+class TestStatusValidation:
+    """Test status enum membership validation."""
+
+    def test_success_status_passes(self):
+        """TransactionStatus.SUCCESS → no error."""
+        validator = Validator()
+        txn = _make_valid_txn(status=TransactionStatus.SUCCESS)
+        result = validator.validate(txn)
+        assert result.is_valid is True
+        assert result.errors == []
+
+    def test_failed_status_passes(self):
+        """TransactionStatus.FAILED → no error."""
+        validator = Validator()
+        txn = _make_valid_txn(status=TransactionStatus.FAILED)
+        result = validator.validate(txn)
+        assert result.is_valid is True
+
+    def test_pending_status_passes(self):
+        """TransactionStatus.PENDING → no error."""
+        validator = Validator()
+        txn = _make_valid_txn(status=TransactionStatus.PENDING)
+        result = validator.validate(txn)
+        assert result.is_valid is True
+
+    def test_reversed_status_passes(self):
+        """TransactionStatus.REVERSED → no error."""
+        validator = Validator()
+        txn = _make_valid_txn(status=TransactionStatus.REVERSED)
+        result = validator.validate(txn)
+        assert result.is_valid is True
+
+
+class TestFullValidation:
+    """Integration tests combining all validation rules."""
+
+    def test_fully_valid_transaction(self):
+        """Transaction with all fields correct → is_valid=True, 0 errors."""
+        validator = Validator()
+        txn = CanonicalTransaction(
+            id="TXN20240115001",
+            trace="REF123456",
+            amount=Decimal("1500000"),
+            currency="VND",
+            status=TransactionStatus.SUCCESS,
+            transDate=datetime(2024, 1, 15),
+        )
+        result = validator.validate(txn)
+        assert result.is_valid is True
+        assert len(result.errors) == 0
+
+    def test_multiple_errors_collected(self):
+        """Transaction with empty id + negative amount → multiple errors."""
+        validator = Validator()
+        txn = _make_valid_txn(id="", amount=Decimal("-500"))
+        result = validator.validate(txn)
+        assert result.is_valid is False
+        assert len(result.errors) == 2
+        fields = {e.field for e in result.errors}
+        assert "id" in fields
+        assert "amount" in fields
+
+    def test_error_count_matches_violations(self):
+        """Transaction with 3 violations → exactly 3 errors."""
+        validator = Validator()
+        txn = _make_valid_txn(id="", currency="", amount=Decimal("-100"))
+        result = validator.validate(txn)
+        assert result.is_valid is False
+        assert len(result.errors) == 3
+
+    def test_all_errors_have_context(self):
+        """All errors include row_number and trace when provided."""
+        validator = Validator()
+        txn = _make_valid_txn(id="", amount=Decimal("-500"))
+        result = validator.validate(txn, row_number=15, trace="BATCH001")
+        for err in result.errors:
+            assert err.row == 15
+            assert err.trace == "BATCH001"
+
+    def test_valid_transaction_with_all_optional_fields(self):
+        """Valid transaction with trace and transDate → fully valid."""
+        validator = Validator()
+        txn = CanonicalTransaction(
+            id="TXN001",
+            trace="REF789",
+            amount=Decimal("99.99"),
+            currency="USD",
+            status=TransactionStatus.PENDING,
+            transDate=datetime(2024, 6, 15, 14, 30, 0),
+            extra={"partnerCode": "VN001"},
+        )
+        result = validator.validate(txn)
+        assert result.is_valid is True
+        assert result.errors == []
