@@ -57,6 +57,8 @@ class Validator:
         result = ValidationResult(is_valid=True, errors=[])
 
         self._validate_required_fields(txn, result, row_number, trace)
+        self._validate_decimal(txn, result, row_number, trace)
+        self._validate_date(txn, result, row_number, trace)
 
         result.is_valid = len(result.errors) == 0
         return result
@@ -90,3 +92,44 @@ class Validator:
                 row=row_number,
                 trace=trace,
             ))
+
+    def _validate_decimal(
+        self,
+        txn: CanonicalTransaction,
+        result: ValidationResult,
+        row_number: Optional[int],
+        trace: Optional[str],
+    ) -> None:
+        """Validate amount business rules.
+
+        - Amount must be non-negative (zero is valid for refunds/zero-value txns).
+        - Type correctness already enforced by CanonicalTransaction pydantic model.
+        """
+        if txn.amount < 0:
+            result.errors.append(ValidationError(
+                field="amount",
+                reason=f"amount must be non-negative, got {txn.amount}",
+                row=row_number,
+                trace=trace,
+            ))
+
+    def _validate_date(
+        self,
+        txn: CanonicalTransaction,
+        result: ValidationResult,
+        row_number: Optional[int],
+        trace: Optional[str],
+    ) -> None:
+        """Validate transDate type integrity.
+
+        - transDate is Optional[datetime] — if None, skip (it's optional).
+        - If present, confirm it's a datetime instance (defensive type check).
+        """
+        if txn.transDate is not None:
+            if not isinstance(txn.transDate, datetime):
+                result.errors.append(ValidationError(
+                    field="transDate",
+                    reason="transDate must be a datetime object",
+                    row=row_number,
+                    trace=trace,
+                ))
