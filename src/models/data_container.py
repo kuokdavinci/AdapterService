@@ -91,6 +91,24 @@ class DataContainerRepository(BaseRepository[DataContainer]):
         super().__init__(collection_name="data_container", db=db)
         self._set_model_class(DataContainer)
 
+    async def insert_many(self, docs: list[DataContainer]) -> int:
+        """Bulk insert multiple DataContainer documents.
+
+        Uses collection.insert_many for efficient batch insertion.
+        Documents are serialized via model_dump(by_alias=True).
+
+        Args:
+            docs: List of DataContainer objects to insert.
+
+        Returns:
+            Number of documents inserted.
+        """
+        if not docs:
+            return 0
+        serialized = [doc.model_dump(by_alias=True, exclude_none=False) for doc in docs]
+        result = await self.collection.insert_many(serialized)
+        return len(result.inserted_ids)
+
     async def find_by_trace(
         self, identify: str, trace: str
     ) -> Optional[DataContainer]:

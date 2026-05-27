@@ -359,6 +359,70 @@ class TestDataContainerRepository:
         assert result.identify == "MOMO"
         assert result.partner_data.trace == "TRACE001"
 
+    def test_has_insert_many_method(self):
+        """DataContainerRepository has insert_many method for bulk inserts."""
+        from src.models.data_container import DataContainerRepository
+
+        assert hasattr(DataContainerRepository, "insert_many")
+
+    @pytest.mark.asyncio
+    async def test_insert_many_calls_collection_insert_many(self):
+        """insert_many uses collection.insert_many with serialized documents."""
+        from src.models.data_container import DataContainer, DataContainerRepository, PartnerData
+
+        mock_db = MagicMock()
+        mock_collection = AsyncMock()
+        mock_collection.insert_many.return_value = MagicMock(inserted_ids=[1, 2, 3])
+        mock_db.__getitem__.return_value = mock_collection
+
+        repo = DataContainerRepository(db=mock_db)
+        repo._set_model_class(DataContainer)
+
+        rec_date = datetime(2024, 1, 15, tzinfo=timezone.utc)
+        partner = PartnerData(
+            id="txn1",
+            status="SUCCESS",
+            amount=Decimal("100000"),
+            currency="VND",
+        )
+        docs = [
+            DataContainer(
+                identify="MOMO",
+                workflow_type="UPC",
+                reconciliation_date=rec_date,
+                source_file_id=uuid.uuid4(),
+                partner_data=partner,
+            )
+            for _ in range(3)
+        ]
+
+        count = await repo.insert_many(docs)
+
+        assert count == 3
+        mock_collection.insert_many.assert_called_once()
+        call_docs = mock_collection.insert_many.call_args[0][0]
+        assert len(call_docs) == 3
+        # Verify documents are serialized with by_alias
+        for doc in call_docs:
+            assert "partnerData" in doc
+            assert "workflowType" in doc
+
+    @pytest.mark.asyncio
+    async def test_insert_many_returns_zero_for_empty_list(self):
+        """insert_many returns 0 when given an empty list."""
+        from src.models.data_container import DataContainerRepository
+
+        mock_db = MagicMock()
+        mock_collection = AsyncMock()
+        mock_db.__getitem__.return_value = mock_collection
+
+        repo = DataContainerRepository(db=mock_db)
+
+        count = await repo.insert_many([])
+
+        assert count == 0
+        mock_collection.insert_many.assert_not_called()
+
 
 class TestModelImports:
     """Tests that all model imports work correctly."""
