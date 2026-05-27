@@ -1,5 +1,7 @@
 """Excel streaming reader using openpyxl in read-only mode."""
 
+from __future__ import annotations
+
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Self
@@ -7,6 +9,8 @@ from typing import Self
 from openpyxl import load_workbook
 from openpyxl.workbook import Workbook
 from openpyxl.worksheet.worksheet import Worksheet
+
+from src.models.mapping_config import MappingConfig
 
 VALID_EXTENSIONS = {".xlsx", ".xlsm"}
 
@@ -72,6 +76,29 @@ class ExcelStreamReader:
         self._skip_patterns: list[str] | None = (
             skip_patterns if skip_patterns is not None
             else self.DEFAULT_SKIP_PATTERNS
+        )
+
+    @classmethod
+    def from_mapping_config(
+        cls, file_path: str | Path, config: MappingConfig
+    ) -> ExcelStreamReader:
+        """Create an ExcelStreamReader from a MappingConfig object.
+
+        Uses config.sheet_name and config.start_row to configure the reader.
+        Empty row skipping is enabled by default.
+
+        Args:
+            file_path: Path to the Excel file (.xlsx or .xlsm).
+            config: MappingConfig containing sheet_name and start_row.
+
+        Returns:
+            Configured ExcelStreamReader instance.
+        """
+        return cls(
+            file_path=file_path,
+            sheet_name=config.sheet_name,
+            start_row=config.start_row,
+            skip_empty_rows=True,
         )
 
     def __enter__(self) -> Self:
