@@ -1,0 +1,22 @@
+"""Application settings loaded from environment variables."""
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    """Application configuration with environment variable overrides."""
+
+    mongodb_url: str = "mongodb://localhost:27017"
+    db_name: str = "reconciliation"
+    log_level: str = "INFO"
+    log_format: str = "json"
+    app_name: str = "reconciliation-ingestion"
+
+    model_config = SettingsConfigDict(
+        env_prefix="APP_",
+        env_file=".env",
+        env_file_encoding="utf-8",
+    )
+
+
+settings = Settings()
