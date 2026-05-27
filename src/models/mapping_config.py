@@ -31,6 +31,7 @@ class MappingConfig(BaseModel):
     sheet_name: str = Field(alias="sheetName")
     start_row: int = Field(default=2, alias="startRow")
     field_mappings: list[FieldMapping] = Field(alias="fieldMappings")
+    config_version: Optional[str] = Field(default=None, alias="configVersion")
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc), alias="createdAt"
     )
