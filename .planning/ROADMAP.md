@@ -53,7 +53,11 @@ Plans:
 - CONFIG-01: Mapping config loader from MongoDB (field mappings, transformations, status mappings, constants)
 - CONFIG-02: Config versioning and caching
 
-**Plans:** 0 plans
+**Plans:** 2 plans
+
+Plans:
+- [x] 03-01-PLAN.md — ConfigCache (TTL in-memory) and ConfigValidator (field mapping integrity checks)
+- [x] 03-02-PLAN.md — ConfigLoader service with repository, cache, validator integration + full test suite
 
 ---
 
