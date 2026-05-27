@@ -296,6 +296,68 @@ class TestDataContainerRepository:
         assert hasattr(DataContainerRepository, "find_by_trace")
         assert hasattr(DataContainerRepository, "find_by_source_file")
         assert hasattr(DataContainerRepository, "find_by_date_range")
+        assert hasattr(DataContainerRepository, "find_by_duplicate_key")
+
+    @pytest.mark.asyncio
+    async def test_find_by_duplicate_key_returns_none_when_no_match(self):
+        """find_by_duplicate_key returns None when no matching transaction exists."""
+        from unittest.mock import AsyncMock, MagicMock
+        from src.models.data_container import DataContainerRepository
+
+        mock_db = MagicMock()
+        mock_collection = AsyncMock()
+        mock_collection.find_one.return_value = None
+        mock_db.__getitem__.return_value = mock_collection
+
+        repo = DataContainerRepository(db=mock_db)
+        repo._set_model_class(type("Dummy", (), {"model_validate": lambda self, d: d})())
+
+        rec_date = datetime(2024, 1, 15, tzinfo=timezone.utc)
+        result = await repo.find_by_duplicate_key("MOMO", rec_date, "TRACE001")
+
+        assert result is None
+        mock_collection.find_one.assert_called_once_with({
+            "identify": "MOMO",
+            "reconciliationDate": rec_date,
+            "partnerData.trace": "TRACE001",
+        })
+
+    @pytest.mark.asyncio
+    async def test_find_by_duplicate_key_returns_container_when_match(self):
+        """find_by_duplicate_key returns DataContainer when a match exists."""
+        from unittest.mock import AsyncMock, MagicMock
+        from src.models.data_container import DataContainer, DataContainerRepository, PartnerData
+
+        mock_db = MagicMock()
+        mock_collection = AsyncMock()
+
+        rec_date = datetime(2024, 1, 15, tzinfo=timezone.utc)
+        partner = PartnerData(
+            id="61838642196",
+            trace="TRACE001",
+            status="SUCCESS",
+            amount=Decimal("100000"),
+            currency="VND",
+        )
+        existing = DataContainer(
+            identify="MOMO",
+            workflow_type="UPC",
+            reconciliation_date=rec_date,
+            source_file_id=uuid.uuid4(),
+            partner_data=partner,
+        )
+        mock_collection.find_one.return_value = existing.model_dump(by_alias=True)
+
+        mock_db.__getitem__.return_value = mock_collection
+        repo = DataContainerRepository(db=mock_db)
+        repo._set_model_class(DataContainer)
+
+        result = await repo.find_by_duplicate_key("MOMO", rec_date, "TRACE001")
+
+        assert result is not None
+        assert isinstance(result, DataContainer)
+        assert result.identify == "MOMO"
+        assert result.partner_data.trace == "TRACE001"
 
 
 class TestModelImports:

@@ -118,3 +118,26 @@ class DataContainerRepository(BaseRepository[DataContainer]):
                 },
             }
         )
+
+    async def find_by_duplicate_key(
+        self, identify: str, reconciliation_date: datetime, trace: str
+    ) -> Optional[DataContainer]:
+        """Find a transaction by its duplicate detection key.
+
+        Queries by identify + reconciliationDate + partnerData.trace — the
+        composite key used to detect duplicate transactions during ingestion.
+        Uses indexed fields (idx_identify_date + idx_trace) for efficiency.
+
+        Args:
+            identify: Partner identifier.
+            reconciliation_date: Date of the reconciliation file.
+            trace: Partner transaction trace identifier.
+
+        Returns:
+            DataContainer if a matching transaction exists, None otherwise.
+        """
+        return await self.find_one({
+            "identify": identify,
+            "reconciliationDate": reconciliation_date,
+            "partnerData.trace": trace,
+        })
