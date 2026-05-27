@@ -10,7 +10,7 @@ from pymongo import ASCENDING, IndexModel
 INDEXES: dict[str, list[IndexModel]] = {
     "reconciliation_file": [
         IndexModel(
-            "file_hash",
+            "fileHash",
             unique=True,
             name="idx_file_hash_unique",
         ),
@@ -31,23 +31,23 @@ INDEXES: dict[str, list[IndexModel]] = {
     ],
     "data_container": [
         IndexModel(
-            "partner_data.trace",
+            "partnerData.trace",
             name="idx_trace",
         ),
         IndexModel(
-            [("identify", ASCENDING), ("reconciliation_date", ASCENDING)],
+            [("identify", ASCENDING), ("reconciliationDate", ASCENDING)],
             name="idx_identify_date",
         ),
         IndexModel(
-            "operation_status",
+            "operationStatus",
             name="idx_operation_status",
         ),
         IndexModel(
-            "partner_data.status",
+            "partnerData.status",
             name="idx_partner_status",
         ),
         IndexModel(
-            "source_file_id",
+            "sourceFileId",
             name="idx_source_file",
         ),
     ],
