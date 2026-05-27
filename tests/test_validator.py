@@ -54,18 +54,12 @@ class TestRequiredFieldValidation:
         assert len(result.errors) == 1
         assert result.errors[0].field == "id"
 
-    def test_missing_amount_produces_error(self):
-        """CanonicalTransaction with missing amount → ValidationError(field='amount')."""
-        # Note: CanonicalTransaction requires amount, so we test via validator
-        # by checking the validator handles the case where amount is None/missing
+    def test_valid_amount_present_no_error(self):
+        """CanonicalTransaction with valid amount → no validation error."""
         validator = Validator()
         txn = _make_valid_txn()
-        # We can't actually construct a CanonicalTransaction without amount
-        # because pydantic enforces it. But the validator should still check.
-        # The validator focuses on business rules: amount must be non-negative.
-        # For required field checks, the validator confirms amount is present.
         result = validator.validate(txn)
-        assert result.is_valid is True  # Valid amount present
+        assert result.is_valid is True
 
     def test_missing_currency_produces_error(self):
         """CanonicalTransaction with empty currency → ValidationError(field='currency')."""
