@@ -101,11 +101,20 @@ class TransactionNormalizer:
                     value, error = self._convert_decimal(source_value, fm, row_number)
                 elif fm.type == FieldMappingType.DATE:
                     value, error = self._convert_date(source_value, fm, row_number)
+                elif fm.type == FieldMappingType.MAPPING:
+                    if fm.mapping is None:
+                        error = ValidationError(
+                            field=fm.path,
+                            reason=f"mapping dict not configured for {fm.path}",
+                            row=row_number,
+                        )
+                    else:
+                        value, error = self._convert_mapping(source_value, fm, row_number)
                 else:
-                    # MAPPING type — deferred to Plan 02
+                    # Unknown field mapping type
                     error = ValidationError(
                         field=fm.path,
-                        reason=f"mapping type not yet implemented for {fm.path}",
+                        reason=f"unknown mapping type '{fm.type}' for path '{fm.path}'",
                         row=row_number,
                     )
 
@@ -250,6 +259,43 @@ class TransactionNormalizer:
         return None, ValidationError(
             field=fm.path,
             reason=f"invalid date value: {value!r} (tried formats: {', '.join(self._DATE_FORMATS)})",
+            row=row_number,
+        )
+
+    @staticmethod
+    def _convert_mapping(
+        value: Any,
+        fm: FieldMapping,
+        row_number: Optional[int] = None,
+    ) -> tuple[str | None, ValidationError | None]:
+        """Convert a row value using a configured mapping dictionary.
+
+        Looks up the string representation of *value* in ``fm.mapping``.
+        If the value is not found, falls back to the ``"others"`` key if
+        present.  Missing ``"others"`` produces an explicit ValidationError
+        rather than silently defaulting.
+
+        Returns the mapped string value (not a TransactionStatus enum —
+        the caller converts to enum in build_canonical).
+        """
+        if value is None or value == "":
+            return None, ValidationError(
+                field=fm.path,
+                reason=f"cannot map empty/null value for path '{fm.path}'",
+                row=row_number,
+            )
+
+        str_value = str(value)
+
+        if str_value in fm.mapping:
+            return fm.mapping[str_value], None
+
+        if "others" in fm.mapping:
+            return fm.mapping["others"], None
+
+        return None, ValidationError(
+            field=fm.path,
+            reason=f"unmapped value '{str_value}' for path '{fm.path}' — no 'others' fallback configured",
             row=row_number,
         )
 
