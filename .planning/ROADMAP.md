@@ -40,8 +40,8 @@ Plans:
 **Plans:** 2 plans
 
 Plans:
-- [ ] 02-01-PLAN.md — Core Excel streaming reader with openpyxl read-only mode, sheet selection, start_row
-- [ ] 02-02-PLAN.md — Row filtering (empty/summary), MappingConfig integration, comprehensive tests
+- [x] 02-01-PLAN.md — Core Excel streaming reader with openpyxl read-only mode, sheet selection, start_row
+- [x] 02-02-PLAN.md — Row filtering (empty/summary), MappingConfig integration, comprehensive tests
 
 ---
 
