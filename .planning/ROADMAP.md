@@ -37,7 +37,11 @@ Plans:
 - READER-01: Stream Excel rows efficiently using openpyxl read-only mode
 - READER-02: Support configurable sheet selection, skip empty/summary rows
 
-**Plans:** 0 plans
+**Plans:** 2 plans
+
+Plans:
+- [ ] 02-01-PLAN.md — Core Excel streaming reader with openpyxl read-only mode, sheet selection, start_row
+- [ ] 02-02-PLAN.md — Row filtering (empty/summary), MappingConfig integration, comprehensive tests
 
 ---
 
