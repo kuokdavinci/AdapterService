@@ -6,6 +6,7 @@ Exports:
 """
 
 from dataclasses import dataclass, field
+from pathlib import Path
 import time
 from typing import Any, Optional
 
@@ -203,7 +204,7 @@ class IngestionPipeline:
                 )
 
             # Step 3: Create ReconciliationFile with PROCESSING status
-            file_name = file_path.split("/")[-1] if "/" in file_path else file_path
+            file_name = Path(file_path).name
             file_record = ReconciliationFile(
                 partner=partner,
                 file_name=file_name,
