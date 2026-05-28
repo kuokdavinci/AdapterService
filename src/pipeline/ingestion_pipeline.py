@@ -21,7 +21,7 @@ from src.models.data_container import DataContainer, DataContainerRepository, Pa
 from src.models.mapping_config import MappingConfig
 from src.models.reconciliation_file import ReconciliationFile, ReconciliationFileRepository
 from src.normalizer.normalizer import TransactionNormalizer
-from src.readers.excel_reader import ExcelStreamReader
+from src.readers import create_reader
 from src.validators.validator import Validator
 
 
@@ -225,7 +225,7 @@ class IngestionPipeline:
                 )
 
             # Step 5-7: Create reader, normalizer, validator
-            with ExcelStreamReader.from_mapping_config(file_path, config) as reader:
+            with create_reader(file_path, config) as reader:
                 normalizer = TransactionNormalizer(config.field_mappings)
                 validator = Validator(
                     data_container_repo=self._data_repo,
