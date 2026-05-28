@@ -95,7 +95,8 @@ class ConfigValidator:
                 ))
 
             # Column format validation (if column is set)
-            if fm.column is not None:
+            # column is now an int (1-based), skip format validation
+            if fm.column is not None and isinstance(fm.column, str):
                 col_upper = fm.column.upper()
                 if not ConfigValidator.COLUMN_PATTERN.match(col_upper):
                     errors.append(ConfigValidationError(

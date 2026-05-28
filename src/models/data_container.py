@@ -95,7 +95,7 @@ class DataContainerRepository(BaseRepository[DataContainer]):
         """Bulk insert multiple DataContainer documents.
 
         Uses collection.insert_many for efficient batch insertion.
-        Documents are serialized via model_dump(by_alias=True).
+        Documents are serialized with UUID-to-string conversion.
 
         Args:
             docs: List of DataContainer objects to insert.
@@ -105,7 +105,7 @@ class DataContainerRepository(BaseRepository[DataContainer]):
         """
         if not docs:
             return 0
-        serialized = [doc.model_dump(by_alias=True, exclude_none=False) for doc in docs]
+        serialized = [self._to_mongo(doc) for doc in docs]
         result = await self.collection.insert_many(serialized)
         return len(result.inserted_ids)
 

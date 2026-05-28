@@ -1,6 +1,6 @@
 """Core normalization engine for the reconciliation ingestion platform.
 
-Transforms partner-specific row dictionaries into canonical field values
+Transforms partner-specific row tuples into canonical field values
 using FieldMapping rules, collecting all validation errors rather than
 failing fast.
 """
@@ -29,7 +29,7 @@ class NormalizationResult:
 
 
 class TransactionNormalizer:
-    """Applies FieldMapping rules to raw row dictionaries.
+    """Applies FieldMapping rules to raw row tuples.
 
     Performs type conversions (STRING, DECIMAL, DATE, CONSTANT) and
     collects validation errors. Never raises exceptions — all errors
@@ -58,13 +58,13 @@ class TransactionNormalizer:
 
     def normalize(
         self,
-        row: dict[str, Any],
+        row: Any,
         row_number: Optional[int] = None,
     ) -> NormalizationResult:
-        """Normalize a single row dictionary against configured field mappings.
+        """Normalize a single row tuple against configured field mappings.
 
         Args:
-            row: Raw row dictionary keyed by column letter or source field name.
+            row: Raw row tuple from ExcelStreamReader (0-indexed).
             row_number: Optional row number for error context.
 
         Returns:
@@ -127,37 +127,78 @@ class TransactionNormalizer:
 
     def _resolve_source(
         self,
-        row: dict[str, Any],
+        row: Any,
         fm: FieldMapping,
     ) -> Any | ValidationError | None:
-        """Resolve the source value from the row dictionary.
-
-        Column letter takes precedence over sourceField if both are set.
+        """Resolve the source value from the row using column number/letter or sourceField.
 
         Returns:
             The resolved value, a ValidationError if resolution fails, or None
             if the value itself is None/empty (caller should produce error).
         """
         if fm.column is not None:
-            if fm.column not in row:
+            if isinstance(row, dict):
+                if fm.column in row:
+                    return row[fm.column]
+                # If column is an int but row has string keys (e.g. "A")
+                if isinstance(fm.column, int):
+                    from openpyxl.utils import get_column_letter
+                    col_letter = get_column_letter(fm.column)
+                    if col_letter in row:
+                        return row[col_letter]
+                # If column is a string but row has int keys
+                if isinstance(fm.column, str) and fm.column.isdigit():
+                    col_int = int(fm.column)
+                    if col_int in row:
+                        return row[col_int]
                 return ValidationError(
                     field=fm.path,
-                    reason=f"source field not found in row (column {fm.column})",
+                    reason=f"column {fm.column} not found in row keys: {list(row.keys())}",
                 )
-            return row[fm.column]
+
+            elif isinstance(row, (tuple, list)):
+                col_int = None
+                if isinstance(fm.column, int):
+                    col_int = fm.column
+                elif isinstance(fm.column, str):
+                    if fm.column.isdigit():
+                        col_int = int(fm.column)
+                    else:
+                        try:
+                            from openpyxl.utils import column_index_from_string
+                            col_int = column_index_from_string(fm.column)
+                        except ValueError:
+                            return ValidationError(
+                                field=fm.path,
+                                reason=f"invalid column letter '{fm.column}'",
+                            )
+                
+                if col_int is not None:
+                    idx = col_int - 1
+                    if idx < 0 or idx >= len(row):
+                        return ValidationError(
+                            field=fm.path,
+                            reason=f"column {fm.column} (index {idx}) out of range (row has {len(row)} columns)",
+                        )
+                    return row[idx]
 
         if fm.sourceField is not None:
-            if fm.sourceField not in row:
+            if isinstance(row, dict):
+                if fm.sourceField in row:
+                    return row[fm.sourceField]
                 return ValidationError(
                     field=fm.path,
-                    reason=f"source field not found in row (field {fm.sourceField})",
+                    reason=f"sourceField '{fm.sourceField}' not found in row keys: {list(row.keys())}",
                 )
-            return row[fm.sourceField]
+            return ValidationError(
+                field=fm.path,
+                reason="sourceField lookup requires dict — use column number instead",
+            )
 
-        # No column and no sourceField configured for non-CONSTANT mapping
+        # No column configured for non-CONSTANT mapping
         return ValidationError(
             field=fm.path,
-            reason="no column or sourceField configured",
+            reason="no column configured",
         )
 
     @staticmethod
@@ -364,8 +405,27 @@ class TransactionNormalizer:
             return None, errors + new_errors
 
         # Collect extra fields (keys not in CanonicalTransaction schema)
+        # Handle dot-separated paths like "extra.service" → extra["service"] = v
         canonical_keys = {"id", "trace", "amount", "currency", "status", "transDate"}
-        extra = {k: v for k, v in data.items() if k not in canonical_keys}
+        extra: dict[str, Any] = {}
+        for k, v in data.items():
+            if k in canonical_keys:
+                continue
+            if "." in k:
+                # Nested path: "extra.service" → extra["service"] = v
+                parts = k.split(".", 1)
+                if len(parts) == 2:
+                    outer, inner = parts
+                    if outer == "extra":
+                        # "extra.service" → extra["service"]
+                        extra[inner] = v
+                    else:
+                        # Other nested paths
+                        if outer not in extra:
+                            extra[outer] = {}
+                        extra[outer][inner] = v
+            else:
+                extra[k] = v
 
         txn = CanonicalTransaction(
             id=str(data["id"]),

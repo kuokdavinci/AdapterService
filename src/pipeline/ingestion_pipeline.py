@@ -239,11 +239,8 @@ class IngestionPipeline:
                     total_rows += 1
                     row_number = config.start_row + total_rows - 1
 
-                    # 8a: Convert tuple to dict
-                    row_dict = self._tuple_to_dict(row_tuple)
-
-                    # 8b: Normalize
-                    norm_result = normalizer.normalize(row_dict, row_number)
+                    # 8b: Normalize (pass row tuple directly — normalizer uses column numbers)
+                    norm_result = normalizer.normalize(row_tuple, row_number)
 
                     # 8c: If normalization errors → failed, collect, continue
                     if norm_result.errors:
@@ -284,12 +281,9 @@ class IngestionPipeline:
                         )
                         continue
 
-                    # 8f: Validate
-                    validation_result = await validator.validate_with_duplicates(
+                    # 8f: Validate (skip file duplicate check — already done at pipeline level)
+                    validation_result = validator.validate(
                         txn,
-                        identify=partner,
-                        reconciliation_date=reconciliation_date,
-                        file_hash=file_hash,
                         row_number=row_number,
                         trace=txn.trace,
                     )

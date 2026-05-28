@@ -1,7 +1,9 @@
 """Base repository class with common CRUD operations for MongoDB collections."""
 
 from typing import Any, Generic, Optional, TypeVar
+from uuid import UUID
 
+from bson import UuidRepresentation
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from pydantic import BaseModel
 
@@ -24,12 +26,40 @@ class BaseRepository(Generic[T]):
         """Set the pydantic model class for document conversion."""
         self._model_class = model_class
 
+    def _to_mongo(self, doc: T) -> dict:
+        """Convert a pydantic model to a MongoDB-compatible dict.
+
+        UUIDs are converted to strings and Decimals are converted to Decimal128.
+        """
+        data = doc.model_dump(by_alias=True, exclude_none=False)
+        return self._convert_special_types(data)
+
+    @staticmethod
+    def _convert_special_types(obj: Any) -> Any:
+        """Recursively convert UUIDs to strings and Decimals to Decimal128."""
+        from uuid import UUID
+        from decimal import Decimal
+        from bson.decimal128 import Decimal128
+
+        if isinstance(obj, UUID):
+            return str(obj)
+        if isinstance(obj, Decimal):
+            return Decimal128(obj)
+        if isinstance(obj, dict):
+            return {k: BaseRepository._convert_special_types(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [BaseRepository._convert_special_types(item) for item in obj]
+        return obj
+
+    @staticmethod
+    def _convert_uuids(obj: Any) -> Any:
+        """Legacy helper. Recursively convert UUID instances to strings."""
+        return BaseRepository._convert_special_types(obj)
+
     async def create(self, doc: T) -> T:
         """Insert a document into the collection and return it with _id populated."""
-        data = doc.model_dump(by_alias=True, exclude_none=False)
-        # Convert UUID to string for MongoDB storage
+        data = self._to_mongo(doc)
         result = await self.collection.insert_one(data)
-        # Return the original doc (it already has the id)
         return doc
 
     async def find_one(self, query: dict) -> Optional[T]:

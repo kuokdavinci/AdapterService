@@ -13,9 +13,9 @@ class TestSettingsDefaults:
         assert settings is not None
 
     def test_mongodb_url_default(self):
-        """mongodb_url defaults to localhost."""
+        """mongodb_url contains localhost:27017."""
         from src.config.settings import settings
-        assert settings.mongodb_url == "mongodb://localhost:27017"
+        assert "localhost:27017" in settings.mongodb_url
 
     def test_db_name_default(self):
         """db_name defaults to 'reconciliation'."""

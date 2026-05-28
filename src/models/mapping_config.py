@@ -1,11 +1,12 @@
 """MappingConfig model and repository for dynamic parsing configuration."""
 
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, Union
 from uuid import UUID, uuid4
 
+from bson import ObjectId
 from motor.motor_asyncio import AsyncIOMotorDatabase
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from src.core.enums import FileType
 from src.core.types import FieldMapping
@@ -24,7 +25,7 @@ class MappingConfig(BaseModel):
         arbitrary_types_allowed=True,
     )
 
-    id: UUID = Field(default_factory=uuid4, alias="_id")
+    id: Union[UUID, str, ObjectId] = Field(default_factory=uuid4, alias="_id")
     partner: str
     workflow_type: str = Field(alias="workflowType")
     file_type: FileType = Field(alias="fileType")
@@ -35,6 +36,14 @@ class MappingConfig(BaseModel):
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc), alias="createdAt"
     )
+
+    @field_validator("id", mode="before")
+    @classmethod
+    def normalize_id(cls, v):
+        """Accept UUID, ObjectId, or string for _id field."""
+        if isinstance(v, ObjectId):
+            return str(v)
+        return v
 
 
 class MappingConfigRepository(BaseRepository[MappingConfig]):

@@ -3,7 +3,7 @@
 from datetime import datetime
 from decimal import Decimal
 from enum import StrEnum
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 from pydantic import BaseModel, field_validator
 
@@ -22,10 +22,14 @@ class FieldMappingType(StrEnum):
 
 
 class FieldMapping(BaseModel):
-    """Configuration for mapping a source field to a canonical field."""
+    """Configuration for mapping a source field to a canonical field.
+
+    column: 1-based column number from the Excel file (e.g., 1 = column A, 2 = column B).
+    sourceField: optional human-readable field name for documentation.
+    """
 
     path: str
-    column: Optional[str] = None
+    column: Optional[Union[int, str]] = None
     sourceField: Optional[str] = None
     type: FieldMappingType
     required: bool = False
