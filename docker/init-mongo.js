@@ -45,4 +45,28 @@ db.data_container.createIndex(
   { name: "idx_source_file" }
 );
 
-print("MongoDB initialized successfully — all collections and indexes created.");
+// Seeds for default partner configurations
+db.reconciliation_mapping_config.deleteMany({ partner: "MOMO" });
+db.reconciliation_mapping_config.insertOne({
+  _id: "77777777-7777-7777-7777-777777777777",
+  partner: "MOMO",
+  workflowType: "UPC",
+  fileType: "SETTLEMENT",
+  sheetName: "data",
+  startRow: 8,
+  fieldMappings: [
+    { path: "id", column: 2, type: "STRING", required: true },
+    { path: "trace", column: 11, type: "STRING" },
+    { path: "amount", column: 5, type: "DECIMAL" },
+    { path: "currency", constant: "VND", type: "CONSTANT" },
+    { path: "status", column: 18, type: "MAPPING", mapping: { "Thành công": "SUCCESS", "others": "FAILED" } },
+    { path: "transDate", column: 8, type: "DATE" },
+    { path: "extra.service", constant: "PAYMENT", type: "CONSTANT" },
+    { path: "extra.portal", constant: "PaymentGateway", type: "CONSTANT" },
+    { path: "extra.provider", constant: "MOMO", type: "CONSTANT" }
+  ],
+  configVersion: "v_template",
+  createdAt: new Date()
+});
+
+print("MongoDB initialized successfully — collections, indexes, and default MOMO config created.");
