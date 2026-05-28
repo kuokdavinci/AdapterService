@@ -63,8 +63,11 @@ class IngestionPipeline:
         self._data_repo = DataContainerRepository(db)
         self._logger = logger or get_structured_logger()
 
-    def _compute_file_hash(self, file_path: str) -> str:
+    async def _compute_file_hash(self, file_path: str) -> str:
         """Compute SHA256 hash of the file content.
+
+        Runs synchronous file I/O in a thread pool executor to avoid
+        blocking the async event loop.
 
         Args:
             file_path: Path to the file.
@@ -72,13 +75,18 @@ class IngestionPipeline:
         Returns:
             Hex-encoded SHA256 hash string.
         """
+        import asyncio
         import hashlib
 
-        sha256 = hashlib.sha256()
-        with open(file_path, "rb") as f:
-            for chunk in iter(lambda: f.read(8192), b""):
-                sha256.update(chunk)
-        return sha256.hexdigest()
+        def _hash_sync() -> str:
+            sha256 = hashlib.sha256()
+            with open(file_path, "rb") as f:
+                for chunk in iter(lambda: f.read(8192), b""):
+                    sha256.update(chunk)
+            return sha256.hexdigest()
+
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, _hash_sync)
 
     def _tuple_to_dict(self, row_tuple: tuple) -> dict[str, Any]:
         """Convert a row tuple to a dict keyed by column letter.
@@ -170,7 +178,7 @@ class IngestionPipeline:
             start_time = time.monotonic()
 
             # Step 1: Compute file hash
-            file_hash = self._compute_file_hash(file_path)
+            file_hash = await self._compute_file_hash(file_path)
 
             # Step 2: Check for duplicate
             existing = await self._recon_repo.find_by_file_hash(file_hash)
