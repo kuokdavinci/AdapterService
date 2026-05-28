@@ -26,3 +26,6 @@ htmlcov/
 
 # Planning artifacts (internal GSD docs)
 .planning/
+
+# SFTP data (uploaded files)
+sftp_data/
