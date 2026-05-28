@@ -257,7 +257,7 @@ class IngestionPipeline:
                         self._logger.emit_row_failed(
                             str(file_record.id),
                             row_number,
-                            "",
+                            f"row:{row_number}",
                             norm_result.errors[0].reason,
                         )
                         continue
@@ -279,7 +279,7 @@ class IngestionPipeline:
                         self._logger.emit_row_failed(
                             str(file_record.id),
                             row_number,
-                            "",
+                            f"row:{row_number}",
                             build_errors[0].reason,
                         )
                         continue
