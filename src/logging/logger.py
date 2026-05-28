@@ -10,6 +10,7 @@ Provides:
 import json
 import logging
 import sys
+import threading
 from datetime import datetime, timezone
 from enum import StrEnum
 from typing import Any, Optional
@@ -194,11 +195,19 @@ class StructuredLogger:
 
 # Module-level singleton
 _logger: Optional[StructuredLogger] = None
+_lock = threading.Lock()
 
 
 def get_structured_logger(name: str = "reconciliation") -> StructuredLogger:
-    """Get or create the module-level StructuredLogger singleton."""
+    """Get or create the module-level StructuredLogger singleton.
+
+    Uses double-checked locking for thread safety.
+    Note: The ``name`` parameter is only used on the first call; subsequent
+    calls return the existing singleton regardless of the name provided.
+    """
     global _logger
     if _logger is None:
-        _logger = StructuredLogger(name=name)
+        with _lock:
+            if _logger is None:
+                _logger = StructuredLogger(name=name)
     return _logger
