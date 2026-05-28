@@ -5,8 +5,11 @@ Exports:
     IngestionResult: Dataclass holding processing results.
 """
 
+import asyncio
 from dataclasses import dataclass, field
+import hashlib
 from pathlib import Path
+import string
 import time
 from typing import Any, Optional
 
@@ -17,6 +20,9 @@ from src.logging import StructuredLogger, get_structured_logger
 from src.models.data_container import DataContainer, DataContainerRepository, PartnerData
 from src.models.mapping_config import MappingConfig
 from src.models.reconciliation_file import ReconciliationFile, ReconciliationFileRepository
+from src.normalizer.normalizer import TransactionNormalizer
+from src.readers.excel_reader import ExcelStreamReader
+from src.validators.validator import Validator
 
 
 @dataclass
@@ -76,9 +82,6 @@ class IngestionPipeline:
         Returns:
             Hex-encoded SHA256 hash string.
         """
-        import asyncio
-        import hashlib
-
         def _hash_sync() -> str:
             sha256 = hashlib.sha256()
             with open(file_path, "rb") as f:
@@ -100,8 +103,6 @@ class IngestionPipeline:
         Returns:
             Dict mapping column letters to cell values.
         """
-        import string
-
         return {
             string.ascii_uppercase[i]: value
             for i, value in enumerate(row_tuple)
@@ -162,12 +163,6 @@ class IngestionPipeline:
         Returns:
             IngestionResult with file_record, stats, and errors.
         """
-        from datetime import datetime
-
-        from src.normalizer.normalizer import TransactionNormalizer
-        from src.readers.excel_reader import ExcelStreamReader
-        from src.validators.validator import Validator
-
         # Initialize tracking variables
         total_rows = 0
         success_rows = 0
