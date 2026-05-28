@@ -6,11 +6,13 @@ Exports:
 """
 
 from dataclasses import dataclass, field
+import time
 from typing import Any, Optional
 
 from src.config.loader import ConfigLoader
 from src.core.enums import ProcessingStatus
 from src.core.types import ProcessingStats
+from src.logging import StructuredLogger, get_structured_logger
 from src.models.data_container import DataContainer, DataContainerRepository, PartnerData
 from src.models.mapping_config import MappingConfig
 from src.models.reconciliation_file import ReconciliationFile, ReconciliationFileRepository
@@ -44,6 +46,7 @@ class IngestionPipeline:
         db: Any,
         config_loader: ConfigLoader,
         batch_size: int = 100,
+        logger: StructuredLogger | None = None,
     ) -> None:
         """Initialize the ingestion pipeline.
 
@@ -51,12 +54,14 @@ class IngestionPipeline:
             db: AsyncIOMotorDatabase instance.
             config_loader: ConfigLoader for loading mapping configurations.
             batch_size: Number of DataContainer objects to batch before inserting.
+            logger: Optional StructuredLogger for lifecycle event emission.
         """
         self._db = db
         self._config_loader = config_loader
         self._batch_size = batch_size
         self._recon_repo = ReconciliationFileRepository(db)
         self._data_repo = DataContainerRepository(db)
+        self._logger = logger or get_structured_logger()
 
     def _compute_file_hash(self, file_path: str) -> str:
         """Compute SHA256 hash of the file content.
@@ -162,13 +167,19 @@ class IngestionPipeline:
         file_record: Optional[ReconciliationFile] = None
 
         try:
+            start_time = time.monotonic()
+
             # Step 1: Compute file hash
             file_hash = self._compute_file_hash(file_path)
 
             # Step 2: Check for duplicate
             existing = await self._recon_repo.find_by_file_hash(file_hash)
             if existing is not None:
-                # File already processed — return early with error
+                # File already processed — emit FILE_FAILED and return early
+                self._logger.emit_file_failed(
+                    "duplicate",
+                    f"File already processed (hash: {file_hash[:16]}...)",
+                )
                 stats = ProcessingStats(
                     total_rows=0, success_rows=0, failed_rows=0
                 )
@@ -195,6 +206,9 @@ class IngestionPipeline:
                 config_version=config_version,
             )
             file_record = await self._recon_repo.create(file_record)
+
+            # Emit FILE_STARTED event
+            self._logger.emit_file_started(str(file_record.id), file_name, partner)
 
             # Step 4: Load MappingConfig
             if config_version is not None:
@@ -236,6 +250,12 @@ class IngestionPipeline:
                                 "field": err.field,
                                 "reason": err.reason,
                             })
+                        self._logger.emit_row_failed(
+                            str(file_record.id),
+                            row_number,
+                            "",
+                            norm_result.errors[0].reason,
+                        )
                         continue
 
                     # 8d: Build CanonicalTransaction
@@ -252,6 +272,12 @@ class IngestionPipeline:
                                 "field": err.field,
                                 "reason": err.reason,
                             })
+                        self._logger.emit_row_failed(
+                            str(file_record.id),
+                            row_number,
+                            "",
+                            build_errors[0].reason,
+                        )
                         continue
 
                     # 8f: Validate
@@ -274,6 +300,12 @@ class IngestionPipeline:
                                 "reason": err.reason,
                                 "trace": err.trace,
                             })
+                        self._logger.emit_row_failed(
+                            str(file_record.id),
+                            row_number,
+                            txn.trace or "",
+                            validation_result.errors[0].reason,
+                        )
                         continue
 
                     # 8g: Valid → add to batch buffer
@@ -294,6 +326,13 @@ class IngestionPipeline:
                         partner_data=partner_data,
                     )
                     batch_buffer.append(data_container)
+
+                    # Emit ROW_SUCCESS event
+                    self._logger.emit_row_success(
+                        str(file_record.id),
+                        row_number,
+                        txn.trace or "",
+                    )
 
                     # 8i: Flush when batch reaches batch_size
                     if len(batch_buffer) >= self._batch_size:
@@ -319,6 +358,12 @@ class IngestionPipeline:
                 file_record.success_rows = success_rows
                 file_record.failed_rows = failed_rows
 
+            # Emit FILE_COMPLETED event
+            duration_ms = (time.monotonic() - start_time) * 1000
+            self._logger.emit_file_completed(
+                str(file_record.id), total_rows, success_rows, failed_rows, duration_ms,
+            )
+
             # Step 11: Return result
             stats = ProcessingStats(
                 total_rows=total_rows,
@@ -333,6 +378,11 @@ class IngestionPipeline:
 
         except Exception as exc:
             # Step: On exception → set status to FAILED
+            duration_ms = (time.monotonic() - start_time) * 1000
+            self._logger.emit_file_failed(
+                str(file_record.id) if file_record else "unknown",
+                str(exc),
+            )
             if file_record is not None:
                 try:
                     await self._recon_repo.update_processing_stats(

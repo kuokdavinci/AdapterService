@@ -9,6 +9,7 @@ Tests cover:
 - process_file with duplicate file hash (early return)
 - process_file exception handling (status → FAILED)
 - Batch insertion (verify insert_many called with correct batch)
+- StructuredLogger integration (lifecycle events emitted)
 """
 
 import hashlib
@@ -28,6 +29,28 @@ from src.core.types import (
     ProcessingStats,
     ValidationError,
 )
+
+
+class MockStructuredLogger:
+    """Mock logger that captures emitted events for test verification."""
+
+    def __init__(self):
+        self.events = []
+
+    def emit_file_started(self, file_id, file_name, partner):
+        self.events.append(("FILE_STARTED", {"file_id": file_id, "file_name": file_name, "partner": partner}))
+
+    def emit_file_completed(self, file_id, total, success, failed, duration_ms):
+        self.events.append(("FILE_COMPLETED", {"file_id": file_id, "total": total, "success": success, "failed": failed, "duration_ms": duration_ms}))
+
+    def emit_file_failed(self, file_id, error):
+        self.events.append(("FILE_FAILED", {"file_id": file_id, "error": error}))
+
+    def emit_row_success(self, file_id, row_number, trace):
+        self.events.append(("ROW_SUCCESS", {"file_id": file_id, "row_number": row_number, "trace": trace}))
+
+    def emit_row_failed(self, file_id, row_number, trace, reason):
+        self.events.append(("ROW_FAILED", {"file_id": file_id, "row_number": row_number, "trace": trace, "reason": reason}))
 
 
 class TestIngestionResult:
@@ -505,5 +528,102 @@ class TestBatchInsertion:
             second_batch = mock_data_repo.insert_many.call_args_list[1][0][0]
             assert len(first_batch) == 5
             assert len(second_batch) == 2
+        finally:
+            Path(temp_path).unlink(missing_ok=True)
+
+
+class TestPipelineLogging:
+    """Tests for StructuredLogger integration in IngestionPipeline."""
+
+    @pytest.mark.asyncio
+    async def test_logger_emits_events_happy_path(self):
+        """process_file emits FILE_STARTED → ROW_SUCCESS×N → FILE_COMPLETED."""
+        from src.pipeline import IngestionPipeline
+        from src.models.reconciliation_file import ReconciliationFileRepository
+        from src.models.data_container import DataContainerRepository
+        from src.models.mapping_config import MappingConfig
+        from src.config.loader import ConfigLoader
+
+        field_mappings = [
+            FieldMapping(path="id", column="A", type=FieldMappingType.STRING, required=True),
+            FieldMapping(path="amount", column="B", type=FieldMappingType.DECIMAL, required=True),
+            FieldMapping(path="currency", constant="VND", type=FieldMappingType.CONSTANT),
+            FieldMapping(
+                path="status",
+                column="C",
+                type=FieldMappingType.MAPPING,
+                mapping={"Success": "SUCCESS"},
+            ),
+        ]
+
+        mock_config = MappingConfig(
+            partner="MOMO",
+            workflow_type="UPC",
+            file_type=FileType.SETTLEMENT,
+            sheet_name="Sheet1",
+            start_row=2,
+            field_mappings=field_mappings,
+        )
+
+        mock_config_loader = MagicMock(spec=ConfigLoader)
+        mock_config_loader.load_by_partner_type = AsyncMock(return_value=mock_config)
+
+        mock_db = MagicMock()
+        mock_recon_repo = MagicMock(spec=ReconciliationFileRepository)
+        mock_recon_repo.find_by_file_hash = AsyncMock(return_value=None)
+        mock_recon_repo.create = AsyncMock(side_effect=lambda doc: doc)
+        mock_recon_repo.update_processing_stats = AsyncMock(return_value=True)
+        mock_recon_repo.update_status = AsyncMock(return_value=True)
+
+        mock_data_repo = MagicMock(spec=DataContainerRepository)
+        mock_data_repo.insert_many = AsyncMock(return_value=3)
+
+        mock_db.__getitem__ = MagicMock(side_effect=lambda name: MagicMock())
+
+        mock_logger = MockStructuredLogger()
+
+        pipeline = IngestionPipeline(
+            db=mock_db, config_loader=mock_config_loader, batch_size=100, logger=mock_logger,
+        )
+        pipeline._recon_repo = mock_recon_repo
+        pipeline._data_repo = mock_data_repo
+
+        import tempfile
+        import openpyxl
+
+        with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
+            wb = openpyxl.Workbook()
+            ws = wb.active
+            ws.title = "Sheet1"
+            ws.append(["ID", "Amount", "Status"])
+            ws.append(["TXN001", 100, "Success"])
+            ws.append(["TXN002", 200, "Success"])
+            ws.append(["TXN003", 300, "Success"])
+            wb.save(f.name)
+            temp_path = f.name
+
+        try:
+            rec_date = datetime(2024, 1, 15, tzinfo=timezone.utc)
+            result = await pipeline.process_file(
+                file_path=temp_path,
+                partner="MOMO",
+                workflow_type="UPC",
+                file_type=FileType.SETTLEMENT,
+                reconciliation_date=rec_date,
+            )
+
+            assert result.stats.total_rows == 3
+            assert result.stats.success_rows == 3
+
+            events = mock_logger.events
+            assert events[0][0] == "FILE_STARTED"
+            row_success_events = [e for e in events if e[0] == "ROW_SUCCESS"]
+            assert len(row_success_events) == 3
+            assert events[-1][0] == "FILE_COMPLETED"
+            completed_data = events[-1][1]
+            assert completed_data["total"] == 3
+            assert completed_data["success"] == 3
+            assert completed_data["failed"] == 0
+            assert completed_data["duration_ms"] > 0
         finally:
             Path(temp_path).unlink(missing_ok=True)
