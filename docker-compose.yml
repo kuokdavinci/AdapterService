@@ -10,8 +10,8 @@ services:
       - mongo_data:/data/db
       - ./docker/init-mongo.js:/docker-entrypoint-initdb.d/init-mongo.js:ro
     environment:
-      MONGO_INITDB_ROOT_USERNAME: admin
-      MONGO_INITDB_ROOT_PASSWORD: admin123
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USER}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
       MONGO_INITDB_DATABASE: reconciliation
     healthcheck:
       test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
@@ -26,9 +26,9 @@ services:
     container_name: reconciliation-sftp
     ports:
       - "2222:22"
+    command: ${SFTP_USER}:${SFTP_PASS}:::upload
     volumes:
-      - ./sftp_data:/home/foo/upload
-      - ./sftp_conf/users.conf:/etc/sftp/users.conf:ro
+      - ./sftp_data:/home/${SFTP_USER}/upload
     restart: unless-stopped
 
 volumes:
