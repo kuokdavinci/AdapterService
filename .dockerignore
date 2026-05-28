@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual environment
+.venv/
+
+# Distribution
+dist/
+build/
+*.egg-info/
+
+# IDE
+.vscode/
+.idea/
+
+# Environment
+.env
+.env.local
+
+# Coverage
+.coverage
+htmlcov/
+
+# Planning artifacts
+.planning/
+
+# Git
+.git/
+.gitignore
+
+# Docker
+docker-compose.yml
+docker/
+
+# SFTP data (don't commit uploaded files)
+sftp_data/
+
+# Test artifacts
+.pytest_cache/

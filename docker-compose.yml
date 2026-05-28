@@ -1,0 +1,36 @@
+version: "3.8"
+
+services:
+  mongodb:
+    image: mongo:7
+    container_name: reconciliation-mongo
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+      - ./docker/init-mongo.js:/docker-entrypoint-initdb.d/init-mongo.js:ro
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: admin123
+      MONGO_INITDB_DATABASE: reconciliation
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  sftp:
+    image: atmoz/sftp
+    container_name: reconciliation-sftp
+    ports:
+      - "2222:22"
+    volumes:
+      - ./sftp_data:/home/foo/upload
+      - ./sftp_conf/users.conf:/etc/sftp/users.conf:ro
+    restart: unless-stopped
+
+volumes:
+  mongo_data:
+    driver: local
