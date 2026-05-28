@@ -119,18 +119,20 @@ class TestTupleToDict:
 class TestComputeFileHash:
     """Tests for _compute_file_hash."""
 
-    def test_compute_file_hash_consistent(self, tmp_path):
+    @pytest.mark.asyncio
+    async def test_compute_file_hash_consistent(self, tmp_path):
         """_compute_file_hash returns consistent SHA256 for same content."""
         from src.pipeline import IngestionPipeline
 
         file_path = tmp_path / "file.xlsx"
         file_path.write_bytes(b"test content")
         pipeline = IngestionPipeline(db=MagicMock(), config_loader=MagicMock())
-        hash1 = pipeline._compute_file_hash(str(file_path))
-        hash2 = pipeline._compute_file_hash(str(file_path))
+        hash1 = await pipeline._compute_file_hash(str(file_path))
+        hash2 = await pipeline._compute_file_hash(str(file_path))
         assert hash1 == hash2
 
-    def test_compute_file_hash_different_content(self, tmp_path):
+    @pytest.mark.asyncio
+    async def test_compute_file_hash_different_content(self, tmp_path):
         """Different file content produces different hashes."""
         from src.pipeline import IngestionPipeline
 
@@ -139,18 +141,19 @@ class TestComputeFileHash:
         file_a.write_bytes(b"content a")
         file_b.write_bytes(b"content b")
         pipeline = IngestionPipeline(db=MagicMock(), config_loader=MagicMock())
-        hash1 = pipeline._compute_file_hash(str(file_a))
-        hash2 = pipeline._compute_file_hash(str(file_b))
+        hash1 = await pipeline._compute_file_hash(str(file_a))
+        hash2 = await pipeline._compute_file_hash(str(file_b))
         assert hash1 != hash2
 
-    def test_compute_file_hash_is_sha256(self, tmp_path):
+    @pytest.mark.asyncio
+    async def test_compute_file_hash_is_sha256(self, tmp_path):
         """_compute_file_hash produces a valid SHA256 hex string."""
         from src.pipeline import IngestionPipeline
 
         file_path = tmp_path / "file.xlsx"
         file_path.write_bytes(b"test")
         pipeline = IngestionPipeline(db=MagicMock(), config_loader=MagicMock())
-        result = pipeline._compute_file_hash(str(file_path))
+        result = await pipeline._compute_file_hash(str(file_path))
         assert len(result) == 64
         assert all(c in "0123456789abcdef" for c in result)
 
