@@ -627,3 +627,194 @@ class TestPipelineLogging:
             assert completed_data["duration_ms"] > 0
         finally:
             Path(temp_path).unlink(missing_ok=True)
+
+    @pytest.mark.asyncio
+    async def test_logger_emits_mixed_rows(self):
+        """process_file emits ROW_SUCCESS and ROW_FAILED for mixed rows."""
+        from src.pipeline import IngestionPipeline
+        from src.models.reconciliation_file import ReconciliationFileRepository
+        from src.models.data_container import DataContainerRepository
+        from src.models.mapping_config import MappingConfig
+        from src.config.loader import ConfigLoader
+
+        field_mappings = [
+            FieldMapping(path="id", column="A", type=FieldMappingType.STRING, required=True),
+            FieldMapping(path="amount", column="B", type=FieldMappingType.DECIMAL, required=True),
+            FieldMapping(path="currency", constant="VND", type=FieldMappingType.CONSTANT),
+            FieldMapping(
+                path="status",
+                column="C",
+                type=FieldMappingType.MAPPING,
+                mapping={"Success": "SUCCESS", "Failed": "FAILED"},
+            ),
+        ]
+
+        mock_config = MappingConfig(
+            partner="MOMO",
+            workflow_type="UPC",
+            file_type=FileType.SETTLEMENT,
+            sheet_name="Sheet1",
+            start_row=2,
+            field_mappings=field_mappings,
+        )
+
+        mock_config_loader = MagicMock(spec=ConfigLoader)
+        mock_config_loader.load_by_partner_type = AsyncMock(return_value=mock_config)
+
+        mock_db = MagicMock()
+        mock_recon_repo = MagicMock(spec=ReconciliationFileRepository)
+        mock_recon_repo.find_by_file_hash = AsyncMock(return_value=None)
+        mock_recon_repo.create = AsyncMock(side_effect=lambda doc: doc)
+        mock_recon_repo.update_processing_stats = AsyncMock(return_value=True)
+        mock_recon_repo.update_status = AsyncMock(return_value=True)
+
+        mock_data_repo = MagicMock(spec=DataContainerRepository)
+        mock_data_repo.insert_many = AsyncMock(return_value=2)
+
+        mock_db.__getitem__ = MagicMock(side_effect=lambda name: MagicMock())
+
+        mock_logger = MockStructuredLogger()
+
+        pipeline = IngestionPipeline(
+            db=mock_db, config_loader=mock_config_loader, batch_size=100, logger=mock_logger,
+        )
+        pipeline._recon_repo = mock_recon_repo
+        pipeline._data_repo = mock_data_repo
+
+        import tempfile
+        import openpyxl
+
+        with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
+            wb = openpyxl.Workbook()
+            ws = wb.active
+            ws.title = "Sheet1"
+            ws.append(["ID", "Amount", "Status"])
+            ws.append(["TXN001", 100, "Success"])
+            ws.append(["TXN002", None, "Success"])  # invalid amount
+            ws.append(["TXN003", 300, "Success"])
+            wb.save(f.name)
+            temp_path = f.name
+
+        try:
+            rec_date = datetime(2024, 1, 15, tzinfo=timezone.utc)
+            result = await pipeline.process_file(
+                file_path=temp_path,
+                partner="MOMO",
+                workflow_type="UPC",
+                file_type=FileType.SETTLEMENT,
+                reconciliation_date=rec_date,
+            )
+
+            assert result.stats.total_rows == 3
+            assert result.stats.success_rows == 2
+            assert result.stats.failed_rows == 1
+
+            events = mock_logger.events
+            assert events[0][0] == "FILE_STARTED"
+            row_success = [e for e in events if e[0] == "ROW_SUCCESS"]
+            row_failed = [e for e in events if e[0] == "ROW_FAILED"]
+            assert len(row_success) == 2
+            assert len(row_failed) == 1
+            assert row_failed[0][1]["reason"]  # reason is non-empty
+            assert events[-1][0] == "FILE_COMPLETED"
+            completed_data = events[-1][1]
+            assert completed_data["total"] == 3
+            assert completed_data["success"] == 2
+            assert completed_data["failed"] == 1
+        finally:
+            Path(temp_path).unlink(missing_ok=True)
+
+    @pytest.mark.asyncio
+    async def test_logger_duplicate_emits_file_failed_only(self, tmp_path):
+        """Duplicate file emits FILE_FAILED without FILE_STARTED."""
+        from src.pipeline import IngestionPipeline
+        from src.models.reconciliation_file import ReconciliationFile, ReconciliationFileRepository
+        from src.config.loader import ConfigLoader
+
+        # Create a real file so _compute_file_hash succeeds
+        excel_file = tmp_path / "duplicate.xlsx"
+        excel_file.write_bytes(b"fake excel content")
+
+        mock_db = MagicMock()
+        mock_recon_repo = MagicMock(spec=ReconciliationFileRepository)
+
+        existing_file = ReconciliationFile(
+            partner="MOMO",
+            file_name="duplicate.xlsx",
+            file_hash="some_hash",
+            file_type=FileType.SETTLEMENT,
+            reconciliation_date=datetime(2024, 1, 15, tzinfo=timezone.utc),
+        )
+        mock_recon_repo.find_by_file_hash = AsyncMock(return_value=existing_file)
+
+        mock_config_loader = MagicMock(spec=ConfigLoader)
+
+        mock_logger = MockStructuredLogger()
+
+        pipeline = IngestionPipeline(
+            db=mock_db, config_loader=mock_config_loader, batch_size=100, logger=mock_logger,
+        )
+        pipeline._recon_repo = mock_recon_repo
+
+        rec_date = datetime(2024, 1, 15, tzinfo=timezone.utc)
+        result = await pipeline.process_file(
+            file_path=str(excel_file),
+            partner="MOMO",
+            workflow_type="UPC",
+            file_type=FileType.SETTLEMENT,
+            reconciliation_date=rec_date,
+        )
+
+        assert result.stats.total_rows == 0
+        events = mock_logger.events
+        assert len(events) == 1
+        assert events[0][0] == "FILE_FAILED"
+        assert "already processed" in events[0][1]["error"].lower()
+        assert events[0][1]["file_id"] == "duplicate"
+
+    @pytest.mark.asyncio
+    async def test_logger_exception_emits_file_failed(self, tmp_path):
+        """Exception during processing emits FILE_FAILED with error message."""
+        from src.pipeline import IngestionPipeline
+        from src.models.reconciliation_file import ReconciliationFileRepository
+        from src.config.loader import ConfigLoader
+
+        excel_file = tmp_path / "file.xlsx"
+        excel_file.write_bytes(b"fake excel content")
+
+        mock_db = MagicMock()
+        mock_recon_repo = MagicMock(spec=ReconciliationFileRepository)
+        mock_recon_repo.find_by_file_hash = AsyncMock(return_value=None)
+        mock_recon_repo.create = AsyncMock(side_effect=lambda doc: doc)
+        mock_recon_repo.update_processing_stats = AsyncMock(return_value=True)
+        mock_recon_repo.update_status = AsyncMock(return_value=True)
+
+        mock_config_loader = MagicMock(spec=ConfigLoader)
+        mock_config_loader.load_by_partner_type = AsyncMock(
+            side_effect=Exception("Config load failed")
+        )
+
+        mock_logger = MockStructuredLogger()
+
+        pipeline = IngestionPipeline(
+            db=mock_db, config_loader=mock_config_loader, batch_size=100, logger=mock_logger,
+        )
+        pipeline._recon_repo = mock_recon_repo
+
+        rec_date = datetime(2024, 1, 15, tzinfo=timezone.utc)
+        result = await pipeline.process_file(
+            file_path=str(excel_file),
+            partner="MOMO",
+            workflow_type="UPC",
+            file_type=FileType.SETTLEMENT,
+            reconciliation_date=rec_date,
+        )
+
+        assert result.file_record is not None
+        assert result.file_record.processing_status == ProcessingStatus.FAILED
+
+        events = mock_logger.events
+        assert events[0][0] == "FILE_STARTED"
+        failed_events = [e for e in events if e[0] == "FILE_FAILED"]
+        assert len(failed_events) == 1
+        assert "Config load failed" in failed_events[0][1]["error"]
